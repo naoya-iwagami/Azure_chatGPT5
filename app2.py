@@ -27,10 +27,6 @@ app.config['SESSION_FILE_DIR'] = os.path.join(os.getcwd(), 'flask_session')
 app.config['SESSION_PERMANENT'] = False  
 Session(app)  
   
-# プロキシ設定（必要な場合）  
-os.environ['HTTP_PROXY'] = 'http://g3.konicaminolta.jp:8080'  
-os.environ['HTTPS_PROXY'] = 'http://g3.konicaminolta.jp:8080'  
-  
 # Azure OpenAI の設定（環境変数から取得）  
 client = AzureOpenAI(  
     api_key=os.getenv("AZURE_OPENAI_KEY"),  

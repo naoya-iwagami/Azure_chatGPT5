@@ -1,6 +1,7 @@
 # 仮想環境フォルダ
 env/
 Set-AzureEnv.ps1
+メモ.txt
 
 # VScodeフォルダ
 .vscode/
