@@ -1,0 +1,198 @@
+<!DOCTYPE html>  
+<html lang="ja">  
+<head>  
+    <meta charset="UTF-8">  
+    <title>PM Compass app</title>  
+    <!-- Bootstrap CSS -->  
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">  
+    <!-- カスタムスタイルシート -->  
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">  
+</head>  
+<body>  
+<div class="container-fluid">  
+    <div class="row">  
+        <!-- サイドバー -->  
+        <div class="col-md-3 sidebar">  
+            <h4>チャット履歴</h4>  
+            <ul class="chat-history">  
+                {% if chat_sessions %}  
+                    {% set display_sessions = chat_sessions[:max_displayed_history] if not show_all_history else chat_sessions[:max_total_history] %}  
+                    {% for chat in display_sessions %}  
+                        {% if chat.first_assistant_message %}  
+                            <li>  
+                                <form method="POST">  
+                                    <input type="hidden" name="select_chat" value="{{ chat.session_id }}">  
+                                    <button type="submit" class="btn btn-link sidebar-button">  
+                                        {{ chat.first_assistant_message[:10] }}{% if chat.first_assistant_message|length > 10 %}...{% endif %}  
+                                    </button>  
+                                </form>  
+                            </li>  
+                        {% endif %}  
+                    {% endfor %}  
+                {% else %}  
+                    <p>チャット履歴がありません。</p>  
+                {% endif %}  
+            </ul>  
+            {% if chat_sessions|length > max_displayed_history %}  
+                <form method="POST">  
+                    <button type="submit" name="toggle_history" class="btn btn-secondary">  
+                        {{ '少なく表示' if show_all_history else 'もっと見る' }}  
+                    </button>  
+                </form>  
+            {% endif %}  
+            <form method="POST">  
+                <button type="submit" name="new_chat" value="true" class="btn btn-primary mt-2">新しいチャット</button>  
+            </form>  
+            <hr>  
+            <!-- 画像アップロード -->  
+            <h4>画像アップロード</h4>  
+            <form method="POST" enctype="multipart/form-data">  
+                <div class="form-group">  
+                    <input type="file" name="images" multiple class="form-control-file" onchange="this.form.submit()">  
+                    <input type="hidden" name="upload_images" value="1">  
+                </div>  
+            </form>  
+            <!-- アップロードされた画像 -->  
+            {% if images %}  
+                <h5>アップロードされた画像</h5>  
+                {% for img in images %}  
+                    <div class="uploaded-image">  
+                        <p>{{ img.name }}</p>  
+                        <img src="{{ img.url }}" alt="{{ img.name }}" width="100%"/>  
+                        <form method="post">  
+                            <input type="hidden" name="delete_image" value="{{ img.name }}">  
+                            <button type="submit" class="btn btn-danger btn-sm mt-2">削除</button>  
+                        </form>  
+                    </div>  
+                {% endfor %}  
+            {% endif %}  
+        </div>  
+        <!-- メインコンテンツ -->  
+        <div class="col-md-9 main-content">  
+            <!-- アプリ名をヘッダーとして表示 -->  
+            <h1 class="app-title">PM Compass app</h1>  
+            <!-- フラッシュメッセージの表示 -->  
+            {% with messages = get_flashed_messages() %}  
+                {% if messages %}  
+                    <ul class="flashes">  
+                    {% for message in messages %}  
+                        <li>{{ message }}</li>  
+                    {% endfor %}  
+                    </ul>  
+                {% endif %}  
+            {% endwith %}  
+            <!-- チャット表示エリア -->  
+            <div class="chat-box">  
+                {% for msg in chat_history %}  
+                    <div class="message-container {% if msg.role == 'user' %}user{% else %}assistant{% endif %}">  
+                        <div class="message-bubble">  
+                            {% if msg.role == 'user' %}  
+                                <strong>あなた:</strong>  
+                                <p>{{ msg.content|e }}</p>  
+                            {% else %}  
+                                <strong>アシスタント:</strong>  
+                                {% if msg.type == 'html' %}  
+                                    <div class="assistant-message">{{ msg.content|safe }}</div>  
+                                {% else %}  
+                                    <p>{{ msg.content|e }}</p>  
+                                {% endif %}  
+                            {% endif %}  
+                        </div>  
+                    </div>  
+                {% endfor %}  
+                {% if chat_history and chat_history[-1].role == 'user' and not session.get('assistant_responded', False) %}  
+                    <!-- 入力中インジケーターを表示 -->  
+                    <div class="message-container assistant">  
+                        <div class="message-bubble">  
+                            <strong>アシスタント:</strong>  
+                            <p>入力中...</p>  
+                        </div>  
+                    </div>  
+                {% endif %}  
+            </div>  
+            <!-- チャット入力フォーム -->  
+            <!-- フォーム送信は JavaScript により非同期に処理 -->  
+            <form id="chatForm">  
+                <div class="form-group">  
+                    <textarea name="prompt" class="form-control" rows="3" placeholder="ご質問を入力してください:" id="promptTextarea"></textarea>  
+                </div>  
+                <button type="submit" id="sendButton" class="btn btn-success">送信</button>  
+            </form>  
+        </div>  
+    </div>  
+</div>  
+  
+<!-- JavaScript（Enterキーで送信およびAjaxによる送信） -->  
+<script>  
+document.addEventListener('DOMContentLoaded', function() {  
+    const chatForm = document.getElementById('chatForm');  
+    const promptTextarea = document.getElementById('promptTextarea');  
+    const chatBox = document.querySelector('.chat-box');  
+  
+    // ユーザーメッセージ表示を追加する関数  
+    function appendUserMessage(message) {  
+        const messageContainer = document.createElement('div');  
+        messageContainer.classList.add('message-container', 'user');  
+  
+        const bubble = document.createElement('div');  
+        bubble.classList.add('message-bubble');  
+        bubble.innerHTML = `<strong>あなた:</strong> <p>${message}</p>`;  
+  
+        messageContainer.appendChild(bubble);  
+        chatBox.appendChild(messageContainer);  
+        chatBox.scrollTop = chatBox.scrollHeight;  
+    }  
+  
+    // アシスタントメッセージ表示を追加する関数  
+    function appendAssistantMessage(messageHtml) {  
+        const messageContainer = document.createElement('div');  
+        messageContainer.classList.add('message-container', 'assistant');  
+  
+        const bubble = document.createElement('div');  
+        bubble.classList.add('message-bubble');  
+        bubble.innerHTML = `<strong>アシスタント:</strong> <div class="assistant-message">${messageHtml}</div>`;  
+  
+        messageContainer.appendChild(bubble);  
+        chatBox.appendChild(messageContainer);  
+        chatBox.scrollTop = chatBox.scrollHeight;  
+    }  
+  
+    // チャットフォーム送信イベントハンドラ  
+    chatForm.addEventListener('submit', function(e) {  
+        e.preventDefault();  
+        const prompt = promptTextarea.value.trim();  
+        if (!prompt) return;  
+  
+        // ユーザーのメッセージを即時表示（楽観的更新）  
+        appendUserMessage(prompt);  
+        // 入力欄をクリア  
+        promptTextarea.value = '';  
+  
+        // 非同期リクエストでサーバーに送信  
+        fetch('/send_message', {  
+            method: 'POST',  
+            headers: {'Content-Type': 'application/json'},  
+            body: JSON.stringify({ prompt: prompt })  
+        })  
+        .then(response => response.json())  
+        .then(data => {  
+            if (data.response) {  
+                appendAssistantMessage(data.response);  
+            }  
+        })  
+        .catch(error => {  
+            console.error('チャット送信中のエラー:', error);  
+        });  
+    });  
+  
+    // Enterキー送信の処理（Shift+Enterで改行可能）  
+    promptTextarea.addEventListener('keydown', function(e) {  
+        if (e.keyCode === 13 && !e.shiftKey) {  
+            e.preventDefault();  
+            chatForm.dispatchEvent(new Event('submit'));  
+        }  
+    });  
+});  
+</script>  
+</body>  
+</html>  
