@@ -15,7 +15,10 @@ from PIL import Image
 import certifi  
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions  
 from werkzeug.utils import secure_filename  
-import markdown2  # 'markdown2' をインポート  
+import markdown2  # 'markdown2' をインポート 
+
+os.environ['HTTP_PROXY'] = 'http://g3.konicaminolta.jp:8080'  
+os.environ['HTTPS_PROXY'] = 'http://g3.konicaminolta.jp:8080'  
   
 # Flask の初期化  
 app = Flask(__name__)  
@@ -76,27 +79,34 @@ def generate_sas_url(blob_client, blob_name):
 # リクエストヘッダー "X‑MS‑CLIENT‑PRINCIPAL" は Base64 エンコードされた JSON です。  
 def get_authenticated_user():  
     # セッションに既にユーザー情報があればそれを利用  
-    if "user_id" in session:  
+    if "user_id" in session and "user_name" in session:  
         return session["user_id"]  
     client_principal = request.headers.get("X-MS-CLIENT-PRINCIPAL")  
     if client_principal:  
         try:  
             decoded = base64.b64decode(client_principal).decode("utf-8")  
             user_data = json.loads(decoded)  
-            # 環境に合わせてプロパティ名を調整してください  
-            user_id = user_data.get("user_id", None)  
-            if not user_id and "claims" in user_data:  
+            # Object ID と ユーザー プリンシパル名を取得  
+            user_id = None  
+            user_name = None  
+            if "claims" in user_data:  
                 for claim in user_data["claims"]:  
+                    # Object ID の取得  
                     if claim.get("typ") == "http://schemas.microsoft.com/identity/claims/objectidentifier":  
                         user_id = claim.get("val")  
-                        break  
-            if user_id:  
-                session["user_id"] = user_id  
+                    # ユーザー プリンシパル名の取得  
+                    if claim.get("typ") == "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn":  
+                        user_name = claim.get("val")  
+                if user_id:  
+                    session["user_id"] = user_id  
+                if user_name:  
+                    session["user_name"] = user_name  
                 return user_id  
         except Exception as e:  
             print("Easy Auth ユーザー情報の取得エラー:", e)  
     # 取得できなかった場合は anonymous として扱う  
     session["user_id"] = "anonymous@example.com"  
+    session["user_name"] = "anonymous"  
     return session["user_id"]  
 # -------------------------------------------------------------------  
   
@@ -109,10 +119,12 @@ def save_chat_history():
             if idx < len(sidebar):  
                 current = sidebar[idx]  
                 user_id = get_authenticated_user()  
+                user_name = session.get("user_name", "anonymous")  
                 session_id = current.get("session_id")  
                 item = {  
                     'id': session_id,  
                     'user_id': user_id,  
+                    'user_name': user_name,  # ユーザー プリンシパル名を追加  
                     'session_id': session_id,  
                     'messages': current.get("messages", []),  
                     'system_message': current.get("system_message", session.get("default_system_message", "あなたは親切なAIアシスタントです。ユーザーの質問に簡潔かつ正確に答えてください。")),  
@@ -189,7 +201,9 @@ def index():
         session["sidebar_messages"] = load_chat_history() or []  
         session.modified = True  
     if "current_chat_index" not in session:  
-        start_new_chat()  # ここで main_chat_messages も初期化される  
+        start_new_chat()  
+        session["show_all_history"] = False  # 履歴の表示をリセット  
+        session.modified = True  
     if "main_chat_messages" not in session:  
         idx = session.get("current_chat_index", 0)  
         sidebar = session.get("sidebar_messages", [])  
