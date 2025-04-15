@@ -59,22 +59,6 @@ image_container_client = blob_service_client.get_container_client(image_containe
 # 排他制御用ロック  
 lock = threading.Lock()  
   
-# デバッグ用関数：受信したクレーム情報を出力  
-def debug_authenticated_user():  
-    principal_header = request.headers.get("X-MS-CLIENT-PRINCIPAL")  
-    if not principal_header:  
-        debug_info = "ヘッダー 'X-MS-CLIENT-PRINCIPAL' が存在しません。"  
-        print(debug_info)  
-        return debug_info  
-    try:  
-        decoded = base64.b64decode(principal_header).decode("utf-8")  
-        user_data = json.loads(decoded)  
-        debug_info = json.dumps(user_data, indent=4, ensure_ascii=False)  
-    except Exception as e:  
-        debug_info = "X-MS-CLIENT-PRINCIPAL のデコードに失敗しました: " + str(e)  
-    print(debug_info)  
-    return debug_info  
-  
 # SAS トークン付き URL 生成関数  
 def generate_sas_url(blob_client, blob_name):  
     sas_token = generate_blob_sas(  
@@ -88,11 +72,11 @@ def generate_sas_url(blob_client, blob_name):
     return f"{blob_client.url}?{sas_token}"  
   
 # Easy Auth (Entra ID) によるユーザー認証処理  
+# リクエストヘッダー "X‑MS‑CLIENT‑PRINCIPAL" は Base64 エンコードされた JSON です。  
 def get_authenticated_user():  
     # セッションに既にユーザー情報があればそれを利用  
     if "user_id" in session and "user_name" in session:  
         return session["user_id"]  
-  
     client_principal = request.headers.get("X-MS-CLIENT-PRINCIPAL")  
     if client_principal:  
         try:  
@@ -105,8 +89,8 @@ def get_authenticated_user():
                     # Object ID の取得  
                     if claim.get("typ") == "http://schemas.microsoft.com/identity/claims/objectidentifier":  
                         user_id = claim.get("val")  
-                    # ユーザー プリンシパル名の取得  
-                    if claim.get("typ") == "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn":  
+                    # ユーザー名を "name" から取得するよう修正  
+                    if claim.get("typ") == "name":  
                         user_name = claim.get("val")  
             if user_id:  
                 session["user_id"] = user_id  
@@ -115,7 +99,6 @@ def get_authenticated_user():
             return user_id  
         except Exception as e:  
             print("Easy Auth ユーザー情報の取得エラー:", e)  
-  
     # 取得できなかった場合は anonymous として扱う  
     session["user_id"] = "anonymous@example.com"  
     session["user_name"] = "anonymous"  
@@ -135,7 +118,7 @@ def save_chat_history():
                 item = {  
                     'id': session_id,  
                     'user_id': user_id,  
-                    'user_name': user_name,  # ユーザー プリンシパル名を追加  
+                    'user_name': user_name,  # ユーザー名を保存  
                     'session_id': session_id,  
                     'messages': current.get("messages", []),  
                     'system_message': current.get("system_message", session.get("default_system_message", "あなたは親切なAIアシスタントです。ユーザーの質問に簡潔かつ正確に答えてください。")),  
@@ -205,22 +188,17 @@ def index():
     # ユーザー認証（Easy Auth から user_id を取得）  
     get_authenticated_user()  
   
-    # 必要に応じてデバッグ情報を取得し、コンソールへ出力する。  
-    debug_info = debug_authenticated_user()  
-  
+    # セッションの初期化  
     if "default_system_message" not in session:  
         session["default_system_message"] = "あなたは親切なAIアシスタントです。ユーザーの質問に簡潔かつ正確に答えてください。"  
         session.modified = True  
-  
     if "sidebar_messages" not in session:  
         session["sidebar_messages"] = load_chat_history() or []  
         session.modified = True  
-  
     if "current_chat_index" not in session:  
         start_new_chat()  
         session["show_all_history"] = False  # 履歴の表示をリセット  
         session.modified = True  
-  
     if "main_chat_messages" not in session:  
         idx = session.get("current_chat_index", 0)  
         sidebar = session.get("sidebar_messages", [])  
@@ -229,11 +207,9 @@ def index():
         else:  
             session["main_chat_messages"] = []  
         session.modified = True  
-  
     if "image_filenames" not in session:  
         session["image_filenames"] = []  
         session.modified = True  
-  
     if "show_all_history" not in session:  
         session["show_all_history"] = False  
         session.modified = True  
@@ -315,7 +291,6 @@ def index():
     max_total_history = 20  
     show_all_history = session.get("show_all_history", False)  
   
-    # render_template に debug_info を渡す（index.html で先頭に表示できるようにしてください）  
     return render_template(  
         'index.html',  
         chat_history=chat_history,  
@@ -323,8 +298,7 @@ def index():
         images=images,  
         show_all_history=show_all_history,  
         max_displayed_history=max_displayed_history,  
-        max_total_history=max_total_history,  
-        debug_info=debug_info  
+        max_total_history=max_total_history  
     )  
   
 @app.route('/send_message', methods=['POST'])  
@@ -352,7 +326,7 @@ def send_message():
             credential=AzureKeyCredential(search_service_key),  
             transport=transport  
         )  
-        topNDocuments = 5  
+        topNDocuments = 15 
         strictness = 0.1  
         search_results = search_client.search(  
             search_text=prompt,  
@@ -375,7 +349,6 @@ def send_message():
             "1. 簡潔かつ正確に回答してください。\n"  
             "2. 必要に応じて、提供されたコンテキストを参照してください。\n"  
         )  
-  
         # メッセージリスト作成  
         messages_list = []  
         # 現在のチャットのシステム・メッセージを利用  
@@ -384,7 +357,7 @@ def send_message():
         system_msg = sidebar[idx].get("system_message", session.get("default_system_message"))  
         messages_list.append({"role": "system", "content": system_msg})  
         messages_list.append({"role": "user", "content": rule_message})  
-        messages_list.append({"role": "user", "content": f"以下のコンテキストを参考にしてください: {context[:15000]}"})  
+        messages_list.append({"role": "user", "content": f"以下のコンテキストを参考にしてください: {context[:20000]}"})  
         past_message_count = 10  
         messages_list.extend(session.get("main_chat_messages", [])[-(past_message_count * 2):])  
   
