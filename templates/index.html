@@ -71,6 +71,13 @@
         <div class="col-md-9 main-content">  
             <!-- アプリ名をヘッダーとして表示 -->  
             <h1 class="app-title">PM Compass app</h1>  
+            <!-- 追加：認証ヘッダー（デバッグ）情報の表示 -->  
+            {% if debug_info %}  
+            <div class="debug-info mb-3">  
+                <h4>認証ヘッダー情報（デバッグ）</h4>  
+                <pre>{{ debug_info }}</pre>  
+            </div>  
+            {% endif %}  
             <!-- フラッシュメッセージの表示 -->  
             {% with messages = get_flashed_messages() %}  
                 {% if messages %}  

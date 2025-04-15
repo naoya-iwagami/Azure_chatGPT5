@@ -15,7 +15,7 @@ from PIL import Image
 import certifi  
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions  
 from werkzeug.utils import secure_filename  
-import markdown2   
+import markdown2  # 'markdown2' をインポート  
   
 # Flask の初期化  
 app = Flask(__name__)  
@@ -59,6 +59,22 @@ image_container_client = blob_service_client.get_container_client(image_containe
 # 排他制御用ロック  
 lock = threading.Lock()  
   
+# デバッグ用関数：受信したクレーム情報を出力  
+def debug_authenticated_user():  
+    principal_header = request.headers.get("X-MS-CLIENT-PRINCIPAL")  
+    if not principal_header:  
+        debug_info = "ヘッダー 'X-MS-CLIENT-PRINCIPAL' が存在しません。"  
+        print(debug_info)  
+        return debug_info  
+    try:  
+        decoded = base64.b64decode(principal_header).decode("utf-8")  
+        user_data = json.loads(decoded)  
+        debug_info = json.dumps(user_data, indent=4, ensure_ascii=False)  
+    except Exception as e:  
+        debug_info = "X-MS-CLIENT-PRINCIPAL のデコードに失敗しました: " + str(e)  
+    print(debug_info)  
+    return debug_info  
+  
 # SAS トークン付き URL 生成関数  
 def generate_sas_url(blob_client, blob_name):  
     sas_token = generate_blob_sas(  
@@ -72,33 +88,12 @@ def generate_sas_url(blob_client, blob_name):
     return f"{blob_client.url}?{sas_token}"  
   
 # Easy Auth (Entra ID) によるユーザー認証処理  
-# リクエストヘッダー "X‑MS‑CLIENT‑PRINCIPAL" は Base64 エンコードされた JSON です。  
-  
-# デバッグ用関数：受信したクレーム情報を出力  
-def debug_authenticated_user():  
-    client_principal = request.headers.get("X‑MS‑CLIENT‑PRINCIPAL")  
-    if client_principal:  
-        try:  
-            decoded = base64.b64decode(client_principal).decode("utf-8")  
-            user_data = json.loads(decoded)  
-            print("----- クレーム情報 -----")  
-            print(json.dumps(user_data, indent=2, ensure_ascii=False))  
-            print("------------------------")  
-        except Exception as e:  
-            print("クレーム情報のパースエラー:", e)  
-    else:  
-        print("X‑MS‑CLIENT‑PRINCIPAL ヘッダーが見つかりません。")  
-  
-# ユーザー認証処理（オブジェクト ID と ユーザー プリンシパル名を取得）  
 def get_authenticated_user():  
     # セッションに既にユーザー情報があればそれを利用  
     if "user_id" in session and "user_name" in session:  
         return session["user_id"]  
   
-    # デバッグ用にクレーム情報を出力  
-    debug_authenticated_user()  
-  
-    client_principal = request.headers.get("X‑MS‑CLIENT‑PRINCIPAL")  
+    client_principal = request.headers.get("X-MS-CLIENT-PRINCIPAL")  
     if client_principal:  
         try:  
             decoded = base64.b64decode(client_principal).decode("utf-8")  
@@ -107,21 +102,11 @@ def get_authenticated_user():
             user_name = None  
             if "claims" in user_data:  
                 for claim in user_data["claims"]:  
-                    # オブジェクト ID の取得  
-                    if claim.get("typ") in [  
-                        "http://schemas.microsoft.com/identity/claims/objectidentifier",  
-                        "objectidentifier"  
-                    ]:  
+                    # Object ID の取得  
+                    if claim.get("typ") == "http://schemas.microsoft.com/identity/claims/objectidentifier":  
                         user_id = claim.get("val")  
-                    # ユーザー プリンシパル名の候補となるクレームをチェック  
-                    if claim.get("typ") in [  
-                        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn",  
-                        "http://schemas.microsoft.com/identity/claims/upn",  
-                        "upn",  
-                        "preferred_username",  
-                        "email",  
-                        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"  
-                    ]:  
+                    # ユーザー プリンシパル名の取得  
+                    if claim.get("typ") == "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn":  
                         user_name = claim.get("val")  
             if user_id:  
                 session["user_id"] = user_id  
@@ -129,7 +114,7 @@ def get_authenticated_user():
                 session["user_name"] = user_name  
             return user_id  
         except Exception as e:  
-            print("ユーザー情報取得エラー:", e)  
+            print("Easy Auth ユーザー情報の取得エラー:", e)  
   
     # 取得できなかった場合は anonymous として扱う  
     session["user_id"] = "anonymous@example.com"  
@@ -219,6 +204,9 @@ def encode_image_from_blob(blob_client):
 def index():  
     # ユーザー認証（Easy Auth から user_id を取得）  
     get_authenticated_user()  
+  
+    # 必要に応じてデバッグ情報を取得し、コンソールへ出力する。  
+    debug_info = debug_authenticated_user()  
   
     if "default_system_message" not in session:  
         session["default_system_message"] = "あなたは親切なAIアシスタントです。ユーザーの質問に簡潔かつ正確に答えてください。"  
@@ -327,6 +315,7 @@ def index():
     max_total_history = 20  
     show_all_history = session.get("show_all_history", False)  
   
+    # render_template に debug_info を渡す（index.html で先頭に表示できるようにしてください）  
     return render_template(  
         'index.html',  
         chat_history=chat_history,  
@@ -334,7 +323,8 @@ def index():
         images=images,  
         show_all_history=show_all_history,  
         max_displayed_history=max_displayed_history,  
-        max_total_history=max_total_history  
+        max_total_history=max_total_history,  
+        debug_info=debug_info  
     )  
   
 @app.route('/send_message', methods=['POST'])  
@@ -415,10 +405,7 @@ def send_message():
                     })  
                 except Exception as e:  
                     print("画像エンコードエラー:", e)  
-            # 画像情報をテキストとして付加（構造化データに変更する場合は適宜修正）  
-            messages_list[2]["content"] = (  
-                [{"type": "text", "text": messages_list[2]["content"]}] + image_contents  
-            )  
+            messages_list[2]["content"] = [{"type": "text", "text": messages_list[2]["content"]}] + image_contents  
   
         response_obj = client.chat.completions.create(  
             model="gpt-4o",  
@@ -426,7 +413,7 @@ def send_message():
         )  
         assistant_response = response_obj.choices[0].message.content  
   
-        # markdown2 を使用して Markdown を HTML に変換  
+        # 'markdown2' を使用して Markdown を HTML に変換  
         assistant_response_html = markdown2.markdown(  
             assistant_response,  
             extras=["tables", "fenced-code-blocks", "code-friendly", "break-on-newline", "cuddled-lists"]  
