@@ -16,9 +16,6 @@ import certifi
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions  
 from werkzeug.utils import secure_filename  
 import markdown2  # 'markdown2' をインポート 
-
-os.environ['HTTP_PROXY'] = 'http://g3.konicaminolta.jp:8080'  
-os.environ['HTTPS_PROXY'] = 'http://g3.konicaminolta.jp:8080'  
   
 # Flask の初期化  
 app = Flask(__name__)  
