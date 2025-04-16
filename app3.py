@@ -17,6 +17,10 @@ from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPerm
 from werkzeug.utils import secure_filename  
 import markdown2  # 'markdown2' をインポート  
   
+# プロキシの設定（必要な場合のみ）  
+os.environ['HTTP_PROXY'] = 'http://g3.konicaminolta.jp:8080'  
+os.environ['HTTPS_PROXY'] = 'http://g3.konicaminolta.jp:8080'  
+  
 # Flask の初期化  
 app = Flask(__name__)  
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-default-secret-key')  # 環境変数からシークレットキーを取得  
@@ -61,18 +65,22 @@ lock = threading.Lock()
   
 # SAS トークン付き URL 生成関数  
 def generate_sas_url(blob_client, blob_name):  
+    # Managed Identity 使用時は blob_client.credential にアカウントキーがないため、  
+    # 明示的に環境変数 "AZURE_STORAGE_ACCOUNT_KEY" からキーを取得するように変更  
+    storage_account_key = os.getenv("AZURE_STORAGE_ACCOUNT_KEY")  
+    if not storage_account_key:  
+        raise Exception("AZURE_STORAGE_ACCOUNT_KEY が設定されていません。")  
     sas_token = generate_blob_sas(  
         account_name=blob_client.account_name,  
         container_name=blob_client.container_name,  
         blob_name=blob_name,  
-        account_key=blob_client.credential.account_key,  
+        account_key=storage_account_key,  
         permission=BlobSasPermissions(read=True),  
         expiry=datetime.datetime.utcnow() + datetime.timedelta(hours=1)  
     )  
     return f"{blob_client.url}?{sas_token}"  
   
 # Easy Auth (Entra ID) によるユーザー認証処理  
-# リクエストヘッダー "X‑MS‑CLIENT‑PRINCIPAL" は Base64 エンコードされた JSON です。  
 def get_authenticated_user():  
     # セッションに既にユーザー情報があればそれを利用  
     if "user_id" in session and "user_name" in session:  
@@ -287,8 +295,8 @@ def index():
         image_url = generate_sas_url(blob_client, filename)  
         images.append({'name': filename, 'url': image_url})  
   
-    max_displayed_history = 5  
-    max_total_history = 20  
+    max_displayed_history = 6  
+    max_total_history = 50  
     show_all_history = session.get("show_all_history", False)  
   
     return render_template(  
@@ -326,7 +334,7 @@ def send_message():
             credential=AzureKeyCredential(search_service_key),  
             transport=transport  
         )  
-        topNDocuments = 15 
+        topNDocuments = 15  
         strictness = 0.1  
         search_results = search_client.search(  
             search_text=prompt,  
