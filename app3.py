@@ -15,11 +15,14 @@ from PIL import Image
 import certifi  
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions  
 from werkzeug.utils import secure_filename  
-import markdown2  # 'markdown2' をインポート  
+import markdown2  # 'markdown2' をインポート    
+  
+os.environ['HTTP_PROXY'] = 'http://g3.konicaminolta.jp:8080'    
+os.environ['HTTPS_PROXY'] = 'http://g3.konicaminolta.jp:8080'    
   
 # Flask の初期化  
 app = Flask(__name__)  
-app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-default-secret-key')  # 環境変数からシークレットキーを取得  
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-default-secret-key')  # 環境変数からシークレットキーを取得    
   
 # セッションをサーバーサイドで保存する設定（ファイルシステムを利用）  
 app.config['SESSION_TYPE'] = 'filesystem'  
@@ -61,8 +64,6 @@ lock = threading.Lock()
   
 # SAS トークン付き URL 生成関数  
 def generate_sas_url(blob_client, blob_name):  
-    # Managed Identity 使用時は blob_client.credential にアカウントキーがないため、  
-    # 明示的に環境変数 "AZURE_STORAGE_ACCOUNT_KEY" からキーを取得するように変更  
     storage_account_key = os.getenv("AZURE_STORAGE_ACCOUNT_KEY")  
     if not storage_account_key:  
         raise Exception("AZURE_STORAGE_ACCOUNT_KEY が設定されていません。")  
@@ -322,6 +323,16 @@ def send_message():
     save_chat_history()  
   
     try:  
+        # ---【ここを修正】検索クエリ作成---  
+        # ユーザー発言の直近2つ  
+        last2_user = [m["content"] for m in messages if m["role"] == "user"][-2:]  
+        # AI発言の直近2つ  
+        last2_ai = [m["content"] for m in messages if m["role"] == "assistant"][-2:]  
+        # 順番：ユーザー2個→AI2個→今回  
+        search_chunks = last2_user + last2_ai + [prompt]  
+        search_query = "\n".join(search_chunks)  
+        # ---修正ここまで---  
+  
         # Azure Cognitive Search を利用した関連ドキュメント検索  
         index_name = "filetest11"  
         search_client = SearchClient(  
@@ -330,10 +341,10 @@ def send_message():
             credential=AzureKeyCredential(search_service_key),  
             transport=transport  
         )  
-        topNDocuments = 15  
+        topNDocuments = 20  
         strictness = 0.1  
         search_results = search_client.search(  
-            search_text=prompt,  
+            search_text=search_query,  # 修正後はここに search_query を渡す  
             search_fields=["content", "title"],  
             select="content,filepath,title,url",  
             query_type="semantic",  
@@ -355,14 +366,13 @@ def send_message():
         )  
         # メッセージリスト作成  
         messages_list = []  
-        # 現在のチャットのシステム・メッセージを利用  
         idx = session.get("current_chat_index", 0)  
         sidebar = session.get("sidebar_messages", [])  
         system_msg = sidebar[idx].get("system_message", session.get("default_system_message"))  
         messages_list.append({"role": "system", "content": system_msg})  
         messages_list.append({"role": "user", "content": rule_message})  
         messages_list.append({"role": "user", "content": f"以下のコンテキストを参考にしてください: {context[:20000]}"})  
-        past_message_count = 10  
+        past_message_count = 20  
         messages_list.extend(session.get("main_chat_messages", [])[-(past_message_count * 2):])  
   
         # 画像アップロード情報があれば追加  
@@ -385,7 +395,7 @@ def send_message():
             messages_list[2]["content"] = [{"type": "text", "text": messages_list[2]["content"]}] + image_contents  
   
         response_obj = client.chat.completions.create(  
-            model="gpt-4o",  
+            model="gpt-4.1",  
             messages=messages_list,  
         )  
         assistant_response = response_obj.choices[0].message.content  
