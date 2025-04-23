@@ -332,14 +332,14 @@ def send_message():
         # ---修正ここまで---  
   
         # Azure Cognitive Search を利用した関連ドキュメント検索  
-        index_name = "filetest11"  
+        index_name = "filetest15"  
         search_client = SearchClient(  
             endpoint=search_service_endpoint,  
             index_name=index_name,  
             credential=AzureKeyCredential(search_service_key),  
             transport=transport  
         )  
-        topNDocuments = 20  
+        topNDocuments = 25  
         strictness = 0.1  
         search_results = search_client.search(  
             search_text=search_query,  # 修正後はここに search_query を渡す  
@@ -369,7 +369,7 @@ def send_message():
         system_msg = sidebar[idx].get("system_message", session.get("default_system_message"))  
         messages_list.append({"role": "system", "content": system_msg})  
         messages_list.append({"role": "user", "content": rule_message})  
-        messages_list.append({"role": "user", "content": f"以下のコンテキストを参考にしてください: {context[:20000]}"})  
+        messages_list.append({"role": "user", "content": f"以下のコンテキストを参考にしてください: {context[:50000]}"})  
         past_message_count = 20  
         messages_list.extend(session.get("main_chat_messages", [])[-(past_message_count * 2):])  
   
