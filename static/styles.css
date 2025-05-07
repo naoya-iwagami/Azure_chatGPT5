@@ -14,32 +14,31 @@ body {
     overflow-y: auto;  
 }  
   
-/* .main-content から height と overflow-y を削除 */  
 .main-content {  
     padding: 20px;  
+    height: calc(100vh - 0px); /* 必要に応じて調整 */  
+    overflow-y: auto;  
 }  
   
 .chat-box {  
     border: 1px solid #ddd;  
     padding: 10px;  
-    height: calc(100vh - 220px);  
-    overflow-y: scroll;  
     margin-bottom: 20px;  
+    height: auto;  
+    overflow: visible;  
 }  
   
+/* 以下は他の部分をそのまま */  
 .message-container {  
     display: flex;  
     margin-bottom: 15px;  
 }  
-  
 .message-container.user {  
     justify-content: flex-end;  
 }  
-  
 .message-container.assistant {  
     justify-content: flex-start;  
 }  
-  
 .message-bubble {  
     max-width: 70%;  
     padding: 10px;  
@@ -47,26 +46,22 @@ body {
     position: relative;  
     word-wrap: break-word;  
 }  
-  
 .message-container.user .message-bubble {  
     background-color: #dcf8c6;  
     color: #000;  
     text-align: left;  
 }  
-  
 .message-container.assistant .message-bubble {  
     background-color: #f1f0f0;  
     color: #000;  
     text-align: left;  
 }  
-  
 .message-bubble::before {  
     content: "";  
     position: absolute;  
     width: 0;  
     height: 0;  
 }  
-  
 .message-container.user .message-bubble::before {  
     right: -10px;  
     top: 10px;  
@@ -74,7 +69,6 @@ body {
     border-left: 10px solid #dcf8c6;  
     border-bottom: 10px solid transparent;  
 }  
-  
 .message-container.assistant .message-bubble::before {  
     left: -10px;  
     top: 10px;  
@@ -82,29 +76,23 @@ body {
     border-right: 10px solid #f1f0f0;  
     border-bottom: 10px solid transparent;  
 }  
-  
 .uploaded-image {  
     margin-bottom: 10px;  
 }  
-  
 .uploaded-image img {  
     max-width: 100%;  
     height: auto;  
 }  
-  
 .uploaded-image form {  
     margin-top: 5px;  
 }  
-  
 .chat-history {  
     list-style: none;  
     padding: 0;  
 }  
-  
 .chat-history li {  
     margin-bottom: 10px;  
 }  
-  
 .sidebar-button {  
     width: 100%;  
     text-align: left;  
@@ -113,68 +101,52 @@ body {
     border: none;  
     background: none;  
 }  
-  
 .btn-link.sidebar-button {  
     color: #007bff;  
     text-decoration: none;  
 }  
-  
 .btn-link.sidebar-button:hover {  
     color: #0056b3;  
     text-decoration: underline;  
 }  
-  
 .btn.btn-danger.btn-sm {  
     font-size: 12px;  
 }  
-  
 .flashes {  
     color: red;  
 }  
-  
-/* テーブルのスタイルを追加 */  
 .assistant-message table {  
     width: 100%;  
     border-collapse: collapse;  
     margin-bottom: 1em;  
 }  
-  
 .assistant-message th,  
 .assistant-message td {  
     border: 1px solid #ddd;  
     padding: 8px;  
     text-align: left;  
 }  
-  
 .assistant-message th {  
     background-color: #f2f2f2;  
     font-weight: bold;  
 }  
-  
 .assistant-message tr:nth-child(even) {  
     background-color: #f9f9f9;  
 }  
-  
-/* コードブロックのスタイル */  
 .assistant-message pre {  
     background-color: #f8f8f8;  
     padding: 10px;  
     overflow-x: auto;  
 }  
-  
 .assistant-message code {  
     background-color: #f8f8f8;  
     padding: 2px 4px;  
     border-radius: 4px;  
 }  
-  
-/* アプリタイトルのスタイルを追加 */  
 .app-title {  
     font-size: 32px;  
     margin-bottom: 20px;  
 }  
-  
-/* Markdown 用のスタイルを追加 */  
 .assistant-message h1,  
 .assistant-message h2,  
 .assistant-message h3,  
@@ -184,23 +156,19 @@ body {
     margin-top: 1em;  
     margin-bottom: 0.5em;  
 }  
-  
 .assistant-message p {  
     margin: 0.5em 0;  
 }  
-  
 .assistant-message ul,  
 .assistant-message ol {  
     margin: 0.5em 0;  
     padding-left: 1.5em;  
 }  
-  
 .assistant-message blockquote {  
     margin: 0.5em 0;  
     padding-left: 1em;  
     border-left: 4px solid #ccc;  
 }  
-  
 .assistant-message img {  
     max-width: 100%;  
     height: auto;  
