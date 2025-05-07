@@ -14,10 +14,9 @@ body {
     overflow-y: auto;  
 }  
   
+/* .main-content から height と overflow-y を削除 */  
 .main-content {  
     padding: 20px;  
-    height: 100vh;  
-    overflow-y: auto;  
 }  
   
 .chat-box {  
