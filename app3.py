@@ -15,9 +15,9 @@ from PIL import Image
 import certifi  
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions  
 from werkzeug.utils import secure_filename  
-import markdown2  # 'markdown2' をインポート    
-  
+import markdown2  # 'markdown2' をインポート  
 
+  
 # Flask の初期化  
 app = Flask(__name__)  
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-default-secret-key')  # 環境変数からシークレットキーを取得    
