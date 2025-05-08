@@ -5,7 +5,7 @@ import threading
 import datetime  
 import uuid  
 from flask import Flask, request, render_template, redirect, url_for, session, flash, jsonify  
-from flask_session import Session  # Flask-Session をインポート  
+from flask_session import Session  
 from azure.search.documents import SearchClient  
 from azure.core.credentials import AzureKeyCredential  
 from azure.core.pipeline.transport import RequestsTransport  
@@ -15,34 +15,29 @@ from PIL import Image
 import certifi  
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions  
 from werkzeug.utils import secure_filename  
-import markdown2  # 'markdown2' をインポート  
-
-os.environ['HTTP_PROXY'] = 'http://g3.konicaminolta.jp:8080'
-os.environ['HTTPS_PROXY'] = 'http://g3.konicaminolta.jp:8080'
+import markdown2  
   
-# Flask の初期化  
+os.environ['HTTP_PROXY'] = 'http://g3.konicaminolta.jp:8080'  
+os.environ['HTTPS_PROXY'] = 'http://g3.konicaminolta.jp:8080'  
+  
 app = Flask(__name__)  
-app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-default-secret-key')  # 環境変数からシークレットキーを取得    
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-default-secret-key')  
   
-# セッションをサーバーサイドで保存する設定（ファイルシステムを利用）  
 app.config['SESSION_TYPE'] = 'filesystem'  
 app.config['SESSION_FILE_DIR'] = os.path.join(os.getcwd(), 'flask_session')  
 app.config['SESSION_PERMANENT'] = False  
 Session(app)  
   
-# Azure OpenAI の設定（環境変数から取得）  
 client = AzureOpenAI(  
     api_key=os.getenv("AZURE_OPENAI_KEY"),  
     api_version=os.getenv("AZURE_OPENAI_API_VERSION"),  
     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")  
 )  
   
-# Azure Cognitive Search の設定  
 search_service_endpoint = os.getenv("AZURE_SEARCH_ENDPOINT")  
 search_service_key = os.getenv("AZURE_SEARCH_KEY")  
 transport = RequestsTransport(verify=certifi.where())  
   
-# Cosmos DB の設定  
 cosmos_endpoint = os.getenv("AZURE_COSMOS_ENDPOINT")  
 cosmos_key = os.getenv("AZURE_COSMOS_KEY")  
 database_name = 'chatdb'  
@@ -51,18 +46,13 @@ cosmos_client = CosmosClient(cosmos_endpoint, credential=cosmos_key)
 database = cosmos_client.get_database_client(database_name)  
 container = database.get_container_client(container_name)  
   
-# Azure Blob Storage の設定  
 blob_connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")  
 blob_service_client = BlobServiceClient.from_connection_string(blob_connection_string)  
-  
-# 使用するコンテナ名（予め作成済み）  
 image_container_name = 'chatgpt-image'  
 image_container_client = blob_service_client.get_container_client(image_container_name)  
   
-# 排他制御用ロック  
 lock = threading.Lock()  
   
-# SAS トークン付き URL 生成関数  
 def generate_sas_url(blob_client, blob_name):  
     storage_account_key = os.getenv("AZURE_STORAGE_ACCOUNT_KEY")  
     if not storage_account_key:  
@@ -77,9 +67,7 @@ def generate_sas_url(blob_client, blob_name):
     )  
     return f"{blob_client.url}?{sas_token}"  
   
-# Easy Auth (Entra ID) によるユーザー認証処理  
 def get_authenticated_user():  
-    # セッションに既にユーザー情報があればそれを利用  
     if "user_id" in session and "user_name" in session:  
         return session["user_id"]  
     client_principal = request.headers.get("X-MS-CLIENT-PRINCIPAL")  
@@ -91,10 +79,8 @@ def get_authenticated_user():
             user_name = None  
             if "claims" in user_data:  
                 for claim in user_data["claims"]:  
-                    # Object ID の取得  
                     if claim.get("typ") == "http://schemas.microsoft.com/identity/claims/objectidentifier":  
                         user_id = claim.get("val")  
-                    # ユーザー名を "name" から取得するよう修正  
                     if claim.get("typ") == "name":  
                         user_name = claim.get("val")  
             if user_id:  
@@ -104,12 +90,10 @@ def get_authenticated_user():
             return user_id  
         except Exception as e:  
             print("Easy Auth ユーザー情報の取得エラー:", e)  
-    # 取得できなかった場合は anonymous として扱う  
     session["user_id"] = "anonymous@example.com"  
     session["user_name"] = "anonymous"  
     return session["user_id"]  
   
-# Cosmos DB へチャット履歴を保存する関数  
 def save_chat_history():  
     with lock:  
         try:  
@@ -123,7 +107,7 @@ def save_chat_history():
                 item = {  
                     'id': session_id,  
                     'user_id': user_id,  
-                    'user_name': user_name,  # ユーザー名を保存  
+                    'user_name': user_name,  
                     'session_id': session_id,  
                     'messages': current.get("messages", []),  
                     'system_message': current.get("system_message", session.get("default_system_message", "あなたは親切なAIアシスタントです。ユーザーの質問に簡潔かつ正確に答えてください。")),  
@@ -134,7 +118,6 @@ def save_chat_history():
         except Exception as e:  
             print(f"チャット履歴保存エラー: {e}")  
   
-# Cosmos DB からチャット履歴を読み込む関数  
 def load_chat_history():  
     with lock:  
         user_id = get_authenticated_user()  
@@ -156,9 +139,7 @@ def load_chat_history():
             print(f"チャット履歴読み込みエラー: {e}")  
         return sidebar_messages  
   
-# 新しいチャットセッションを開始する関数  
 def start_new_chat():  
-    # 既存画像の削除  
     image_filenames = session.get("image_filenames", [])  
     for img_name in image_filenames:  
         blob_client = image_container_client.get_blob_client(img_name)  
@@ -179,10 +160,9 @@ def start_new_chat():
     sidebar.insert(0, new_chat)  
     session["sidebar_messages"] = sidebar  
     session["current_chat_index"] = 0  
-    session["main_chat_messages"] = []  # メインコンテンツエリア用のチャットリスト  
+    session["main_chat_messages"] = []  
     session.modified = True  
   
-# Blob 内の画像を Base64 エンコードする関数  
 def encode_image_from_blob(blob_client):  
     downloader = blob_client.download_blob()  
     image_data = downloader.readall()  
@@ -190,10 +170,7 @@ def encode_image_from_blob(blob_client):
   
 @app.route('/', methods=['GET', 'POST'])  
 def index():  
-    # ユーザー認証（Easy Auth から user_id を取得）  
     get_authenticated_user()  
-  
-    # セッションの初期化  
     if "default_system_message" not in session:  
         session["default_system_message"] = "あなたは親切なAIアシスタントです。ユーザーの質問に簡潔かつ正確に答えてください。"  
         session.modified = True  
@@ -202,7 +179,7 @@ def index():
         session.modified = True  
     if "current_chat_index" not in session:  
         start_new_chat()  
-        session["show_all_history"] = False  # 履歴の表示をリセット  
+        session["show_all_history"] = False  
         session.modified = True  
     if "main_chat_messages" not in session:  
         idx = session.get("current_chat_index", 0)  
@@ -218,17 +195,40 @@ def index():
     if "show_all_history" not in session:  
         session["show_all_history"] = False  
         session.modified = True  
+    if "conversation_mode" not in session:  
+        session["conversation_mode"] = "qa"  
+        session.modified = True  
   
-    # POST リクエストの処理（主にチャット履歴、画像アップロード、チャットセッションの管理）  
     if request.method == 'POST':  
-        # 新しいチャットの開始  
+        # 会話モードの変更  
+        if 'set_conversation_mode' in request.form:  
+            mode = request.form.get("conversation_mode", "qa")  
+            session["conversation_mode"] = mode  
+            session.modified = True  
+            return redirect(url_for('index'))  
+  
+        # システムメッセージの変更  
+        if 'set_system_message' in request.form:  
+            sys_msg = request.form.get("system_message", "").strip()  
+            if sys_msg:  
+                session["default_system_message"] = sys_msg  
+            else:  
+                session["default_system_message"] = "あなたは親切なAIアシスタントです。ユーザーの質問に簡潔かつ正確に答えてください。"  
+            # 現在のチャットにも反映  
+            idx = session.get("current_chat_index", 0)  
+            sidebar = session.get("sidebar_messages", [])  
+            if sidebar and idx < len(sidebar):  
+                sidebar[idx]["system_message"] = session["default_system_message"]  
+                session["sidebar_messages"] = sidebar  
+            session.modified = True  
+            return redirect(url_for('index'))  
+  
         if 'new_chat' in request.form:  
             start_new_chat()  
             session["show_all_history"] = False  
             session.modified = True  
             return redirect(url_for('index'))  
   
-        # サイドバーからのチャット選択（session_id が送信される）  
         if 'select_chat' in request.form:  
             selected_session = request.form.get("select_chat")  
             sidebar = session.get("sidebar_messages", [])  
@@ -236,17 +236,17 @@ def index():
                 if chat.get("session_id") == selected_session:  
                     session["current_chat_index"] = idx  
                     session["main_chat_messages"] = chat.get("messages", [])  
+                    # システムメッセージも切り替え  
+                    session["default_system_message"] = chat.get("system_message", session.get("default_system_message"))  
                     break  
             session.modified = True  
             return redirect(url_for('index'))  
   
-        # 履歴の表示切替  
         if 'toggle_history' in request.form:  
             session["show_all_history"] = not session.get("show_all_history", False)  
             session.modified = True  
             return redirect(url_for('index'))  
   
-        # 画像アップロード処理  
         if 'upload_images' in request.form:  
             if 'images' in request.files:  
                 files = request.files.getlist("images")  
@@ -266,7 +266,6 @@ def index():
                 session.modified = True  
             return redirect(url_for('index'))  
   
-        # アップロード画像削除処理  
         if 'delete_image' in request.form:  
             delete_image_name = request.form.get("delete_image")  
             image_filenames = session.get("image_filenames", [])  
@@ -280,9 +279,6 @@ def index():
             session.modified = True  
             return redirect(url_for('index'))  
   
-        # ※ユーザーのチャット送信処理は AJAX を用いるため、ここでは処理しない  
-  
-    # GET リクエストの処理  
     chat_history = session.get("main_chat_messages", [])  
     sidebar_messages = session.get("sidebar_messages", [])  
     image_filenames = session.get("image_filenames", [])  
@@ -297,13 +293,14 @@ def index():
     show_all_history = session.get("show_all_history", False)  
   
     return render_template(  
-        'index.html',  
+        'index4.html',  
         chat_history=chat_history,  
         chat_sessions=sidebar_messages,  
         images=images,  
         show_all_history=show_all_history,  
         max_displayed_history=max_displayed_history,  
-        max_total_history=max_total_history  
+        max_total_history=max_total_history,  
+        session=session  
     )  
   
 @app.route('/send_message', methods=['POST'])  
@@ -313,27 +310,19 @@ def send_message():
     if not prompt:  
         return json.dumps({'response': ''}), 400, {'Content-Type': 'application/json'}  
   
-    # ユーザーのメッセージを session に追加する  
     messages = session.get("main_chat_messages", [])  
     messages.append({"role": "user", "content": prompt})  
     session["main_chat_messages"] = messages  
     session.modified = True  
   
-    # チャット履歴の保存（Cosmos DB への更新）  
     save_chat_history()  
   
     try:  
-        # ---【ここを修正】検索クエリ作成---  
-        # ユーザー発言の直近2つ  
         last2_user = [m["content"] for m in messages if m["role"] == "user"][-2:]  
-        # AI発言の直近2つ  
         last2_ai = [m["content"] for m in messages if m["role"] == "assistant"][-2:]  
-        # 順番：ユーザー2個→AI2個→今回  
         search_chunks = last2_user + last2_ai + [prompt]  
         search_query = "\n".join(search_chunks)  
-        # ---修正ここまで---  
   
-        # Azure Cognitive Search を利用した関連ドキュメント検索  
         index_name = "filetest15"  
         search_client = SearchClient(  
             endpoint=search_service_endpoint,  
@@ -344,7 +333,7 @@ def send_message():
         topNDocuments = 25  
         strictness = 0.1  
         search_results = search_client.search(  
-            search_text=search_query,  # 修正後はここに search_query を渡す  
+            search_text=search_query,  
             search_fields=["content", "title"],  
             select="content,filepath,title,url",  
             query_type="semantic",  
@@ -364,7 +353,6 @@ def send_message():
             "1. 簡潔かつ正確に回答してください。\n"  
             "2. 必要に応じて、提供されたコンテキストを参照してください。\n"  
         )  
-        # メッセージリスト作成  
         messages_list = []  
         idx = session.get("current_chat_index", 0)  
         sidebar = session.get("sidebar_messages", [])  
@@ -375,7 +363,6 @@ def send_message():
         past_message_count = 20  
         messages_list.extend(session.get("main_chat_messages", [])[-(past_message_count * 2):])  
   
-        # 画像アップロード情報があれば追加  
         image_filenames = session.get("image_filenames", [])  
         if image_filenames:  
             image_contents = []  
@@ -394,24 +381,34 @@ def send_message():
                     print("画像エンコードエラー:", e)  
             messages_list[2]["content"] = [{"type": "text", "text": messages_list[2]["content"]}] + image_contents  
   
+        # 会話モードに応じてモデルとパラメータを切り替え  
+        mode = session.get("conversation_mode", "qa")  
+        if mode == "qa":  
+            model_name = "gpt-4.1"  
+            extra_args = {}  
+        elif mode == "reasoning":  
+            model_name = "o4-mini"  
+            extra_args = {"reasoning_effort": "high"}  
+        else:  
+            model_name = "gpt-4.1"  
+            extra_args = {}  
+  
         response_obj = client.chat.completions.create(  
-            model="gpt-4.1",  
+            model=model_name,  
             messages=messages_list,  
+            **extra_args  
         )  
         assistant_response = response_obj.choices[0].message.content  
   
-        # 'markdown2' を使用して Markdown を HTML に変換  
         assistant_response_html = markdown2.markdown(  
             assistant_response,  
             extras=["tables", "fenced-code-blocks", "code-friendly", "break-on-newline", "cuddled-lists"]  
         )  
   
-        # アシスタント返答を main_chat_messages に追加  
         messages.append({"role": "assistant", "content": assistant_response_html, "type": "html"})  
         session["main_chat_messages"] = messages  
         session.modified = True  
   
-        # sidebar_messages 内の該当セッションも更新  
         idx = session.get("current_chat_index", 0)  
         if idx < len(sidebar):  
             sidebar[idx]["messages"] = messages  
@@ -420,7 +417,6 @@ def send_message():
             session["sidebar_messages"] = sidebar  
             session.modified = True  
   
-        # チャット履歴の保存  
         save_chat_history()  
         session["assistant_responded"] = True  
         session.modified = True  
