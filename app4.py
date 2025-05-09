@@ -15,11 +15,13 @@ from PIL import Image
 import certifi  
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions  
 from werkzeug.utils import secure_filename  
-import markdown2   
+import markdown2  
+  
+os.environ['HTTP_PROXY'] = 'http://g3.konicaminolta.jp:8080'  
+os.environ['HTTPS_PROXY'] = 'http://g3.konicaminolta.jp:8080'  
   
 app = Flask(__name__)  
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-default-secret-key')  
-  
 app.config['SESSION_TYPE'] = 'filesystem'  
 app.config['SESSION_FILE_DIR'] = os.path.join(os.getcwd(), 'flask_session')  
 app.config['SESSION_PERMANENT'] = False  
@@ -207,10 +209,8 @@ def index():
         # システムメッセージの変更  
         if 'set_system_message' in request.form:  
             sys_msg = request.form.get("system_message", "").strip()  
-            if sys_msg:  
-                session["default_system_message"] = sys_msg  
-            else:  
-                session["default_system_message"] = "あなたは親切なAIアシスタントです。ユーザーの質問に簡潔かつ正確に答えてください。"  
+            # 修正: 空欄もそのまま保存する  
+            session["default_system_message"] = sys_msg  
             # 現在のチャットにも反映  
             idx = session.get("current_chat_index", 0)  
             sidebar = session.get("sidebar_messages", [])  
@@ -385,7 +385,7 @@ def send_message():
             extra_args = {}  
         elif mode == "reasoning":  
             model_name = "o4-mini"  
-            extra_args = {"reasoning_effort": "high"}  
+            extra_args = {"reasoning_effort": "medium"}  
         else:  
             model_name = "gpt-4.1"  
             extra_args = {}  

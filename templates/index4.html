@@ -7,6 +7,17 @@
         href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">  
   <link rel="stylesheet"  
         href="{{ url_for('static', filename='styles4.css') }}">  
+  <style>  
+    #loadingInline {  
+      display: none;  
+      align-items: center;  
+    }  
+    #loadingInline .loading-text {  
+      font-size: 1rem;  
+      color: #333;  
+      margin-left: 0.5em;  
+    }  
+  </style>  
 </head>  
 <body>  
   <div class="container-fluid">  
@@ -33,9 +44,8 @@
           </div>  
           <input type="hidden" name="set_conversation_mode" value="1">  
         </form>  
-  
         <!-- モデルに指示を与える -->  
-        <h5>モデルに指示を与える</h4>  
+        <h5>モデルに指示を与える</h5>  
         <form method="POST" style="margin-bottom: 1em;">  
           <div class="form-group">  
             <textarea class="form-control" name="system_message" rows="3"  
@@ -45,16 +55,11 @@
             <input type="hidden" name="set_system_message" value="1">  
           </div>  
         </form>  
-  
         <!-- チャット履歴見出し -->  
         <h4>チャット履歴</h4>  
         <ul class="chat-history">  
           {% if chat_sessions %}  
-            {# ① first_assistant_message があるセッションだけを抽出 #}  
-            {% set answered = chat_sessions  
-               | selectattr('first_assistant_message')  
-               | list %}  
-            {# ② 抽出した中から最新 max_displayed_history 件を選択 #}  
+            {% set answered = chat_sessions | selectattr('first_assistant_message') | list %}  
             {% if not show_all_history %}  
               {% set display_sessions = answered[:max_displayed_history] %}  
             {% else %}  
@@ -118,7 +123,13 @@
       </div>  
       <!-- メインコンテンツ -->  
       <div class="col-md-9 main-content">  
-        <h1 class="app-title">PM Compass app</h1>  
+        <div id="mainHeader" class="d-flex align-items-center justify-content-between mb-3">  
+          <h1 class="app-title mb-0">PM Compass app</h1>  
+          <div id="loadingInline">  
+            <span class="spinner-border spinner-border-sm text-primary" role="status"></span>  
+            <span class="loading-text">応答中です。しばらくお待ちください…</span>  
+          </div>  
+        </div>  
         {% with messages = get_flashed_messages() %}  
           {% if messages %}  
             <ul class="flashes">  
@@ -166,9 +177,25 @@
   </div>  
   <script>  
   document.addEventListener('DOMContentLoaded', function() {  
-    const chatForm = document.getElementById('chatForm');  
+    // --- チャット入力欄の一時保存・復元 ---  
     const promptTextarea = document.getElementById('promptTextarea');  
+    // 復元  
+    if (sessionStorage.getItem('chat_input')) {  
+      promptTextarea.value = sessionStorage.getItem('chat_input');  
+    }  
+    // 入力時に保存  
+    promptTextarea.addEventListener('input', function() {  
+      sessionStorage.setItem('chat_input', promptTextarea.value);  
+    });  
+    // チャット送信時は消去  
+    document.getElementById('chatForm').addEventListener('submit', function() {  
+      sessionStorage.removeItem('chat_input');  
+    });  
+  
+    const chatForm = document.getElementById('chatForm');  
     const chatBox = document.getElementById('chatBox');  
+    const sendButton = document.getElementById('sendButton');  
+    const loadingInline = document.getElementById('loadingInline');  
   
     function scrollChatToBottom() {  
       chatBox.scrollTop = chatBox.scrollHeight;  
@@ -178,7 +205,7 @@
       const c = document.createElement('div');  
       c.className = 'message-container user';  
       c.innerHTML = `<div class="message-bubble">  
-                       <strong>あなた:</strong><p>${message}</p>  
+                       <strong>あなた:</strong><p>${escapeHtml(message)}</p>  
                      </div>`;  
       chatBox.appendChild(c);  
       scrollChatToBottom();  
@@ -195,20 +222,52 @@
       scrollChatToBottom();  
     }  
   
+    // HTMLエスケープ関数  
+    function escapeHtml(str) {  
+      if (!str) return '';  
+      return str.replace(/[&<>"']/g, function(m) {  
+        return ({  
+          '&': '&amp;', '<': '&lt;', '>': '&gt;',  
+          '"': '&quot;', "'": '&#39;'  
+        })[m];  
+      });  
+    }  
+  
+    // ローディング表示制御  
+    function showLoading() {  
+      loadingInline.style.display = 'flex';  
+    }  
+    function hideLoading() {  
+      loadingInline.style.display = 'none';  
+    }  
+  
+    // 初期化時に必ずローディングを非表示に  
+    hideLoading();  
+  
     chatForm.addEventListener('submit', e => {  
       e.preventDefault();  
       const prompt = promptTextarea.value.trim();  
       if (!prompt) return;  
       appendUserMessage(prompt);  
       promptTextarea.value = '';  
+      sendButton.disabled = true;  
+      showLoading();  
       fetch('/send_message', {  
         method: 'POST',  
         headers: {'Content-Type': 'application/json'},  
         body: JSON.stringify({prompt})  
       })  
       .then(r => r.json())  
-      .then(data => data.response && appendAssistantMessage(data.response))  
-      .catch(console.error);  
+      .then(data => {  
+        if (data.response) appendAssistantMessage(data.response);  
+        sendButton.disabled = false;  
+        hideLoading();  
+      })  
+      .catch(e => {  
+        sendButton.disabled = false;  
+        hideLoading();  
+        alert('エラーが発生しました');  
+      });  
     });  
   
     promptTextarea.addEventListener('keydown', e => {  
