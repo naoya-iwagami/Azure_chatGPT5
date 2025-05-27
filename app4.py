@@ -106,7 +106,7 @@ def save_chat_history():
                     'user_name': user_name,  
                     'session_id': session_id,  
                     'messages': current.get("messages", []),  
-                    'system_message': current.get("system_message", session.get("default_system_message", "あなたは親切なAIアシスタントです。ユーザーの質問に簡潔かつ正確に答えてください。")),  
+                    'system_message': current.get("system_message", session.get("default_system_message", "あなたは親切なAIアシスタントです。ユーザーの質問が不明確な場合は、「こういうことですか？」と内容を確認してください。質問が明確な場合は、簡潔かつ正確に答えてください。")),  
                     'first_assistant_message': current.get("first_assistant_message", ""),  
                     'timestamp': datetime.datetime.utcnow().isoformat()  
                 }  
@@ -127,7 +127,7 @@ def load_chat_history():
                     chat = {  
                         "session_id": item['session_id'],  
                         "messages": item.get("messages", []),  
-                        "system_message": item.get("system_message", session.get('default_system_message', "あなたは親切なAIアシスタントです。ユーザーの質問に簡潔かつ正確に答えてください。")),  
+                        "system_message": item.get("system_message", session.get('default_system_message', "あなたは親切なAIアシスタントです。ユーザーの質問が不明確な場合は、「こういうことですか？」と内容を確認してください。質問が明確な場合は、簡潔かつ正確に答えてください。")),  
                         "first_assistant_message": item.get("first_assistant_message", ""),  
                     }  
                     sidebar_messages.append(chat)  
@@ -150,7 +150,7 @@ def start_new_chat():
         "session_id": new_session_id,  
         "messages": [],  
         "first_assistant_message": "",  
-        "system_message": session.get('default_system_message', "あなたは親切なAIアシスタントです。ユーザーの質問に簡潔かつ正確に答えてください。")  
+        "system_message": session.get('default_system_message', "あなたは親切なAIアシスタントです。ユーザーの質問が不明確な場合は、「こういうことですか？」と内容を確認してください。質問が明確な場合は、簡潔かつ正確に答えてください。")  
     }  
     sidebar = session.get("sidebar_messages", [])  
     sidebar.insert(0, new_chat)  
@@ -168,7 +168,7 @@ def encode_image_from_blob(blob_client):
 def index():  
     get_authenticated_user()  
     if "default_system_message" not in session:  
-        session["default_system_message"] = "あなたは親切なAIアシスタントです。ユーザーの質問に簡潔かつ正確に答えてください。"  
+        session["default_system_message"] = "あなたは親切なAIアシスタントです。ユーザーの質問が不明確な場合は、「こういうことですか？」と内容を確認してください。質問が明確な場合は、簡潔かつ正確に答えてください。"  
         session.modified = True  
     if "sidebar_messages" not in session:  
         session["sidebar_messages"] = load_chat_history() or []  
@@ -317,14 +317,14 @@ def send_message():
         search_chunks = last2_user + last2_ai + [prompt]  
         search_query = "\n".join(search_chunks)  
   
-        index_name = "filetest15"  
+        index_name = "filetest11"  
         search_client = SearchClient(  
             endpoint=search_service_endpoint,  
             index_name=index_name,  
             credential=AzureKeyCredential(search_service_key),  
             transport=transport  
         )  
-        topNDocuments = 25  
+        topNDocuments = 20  
         strictness = 0.1  
         search_results = search_client.search(  
             search_text=search_query,  

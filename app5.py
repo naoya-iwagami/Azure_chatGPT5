@@ -6,9 +6,6 @@ import datetime
 import uuid  
 from flask import Flask, request, render_template, redirect, url_for, session, flash, jsonify  
 from flask_session import Session  
-# from redis import StrictRedis  # ← 従来  
-import redis  # redis-py 5.0以上  
-from azure.identity import DefaultAzureCredential  # 追加  
 from azure.search.documents import SearchClient  
 from azure.core.credentials import AzureKeyCredential  
 from azure.core.pipeline.transport import RequestsTransport  
@@ -18,43 +15,16 @@ from PIL import Image
 import certifi  
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions  
 from werkzeug.utils import secure_filename  
-import markdown2  
-  
-# プロキシ設定  
-os.environ['HTTP_PROXY'] = 'http://g3.konicaminolta.jp:8080'  
+import markdown2
+
+os.environ['HTTP_PROXY']  = 'http://g3.konicaminolta.jp:8080'  
 os.environ['HTTPS_PROXY'] = 'http://g3.konicaminolta.jp:8080'  
   
 app = Flask(__name__)  
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-default-secret-key')  
-  
-# Redisセッションの設定（Entra ID認証版）  
-redis_host = os.getenv('REDIS_HOST', 'your-redis-host.redis.cache.windows.net')  
-redis_port = int(os.getenv('REDIS_PORT', 6380))  
-redis_ssl = True  # Azure RedisはSSL必須  
-  
-# Entra ID認証用の追加環境変数  
-redis_object_id = os.getenv('REDIS_OBJECT_ID', 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx')  # Redisユーザー作成時のObjectId  
-# RedisのEntra ID認証用スコープ（必要に応じて修正）  
-redis_scope = os.getenv('REDIS_SCOPE', 'https://*.cacheinfra.windows.net:10225/appid/.default')  
-  
-# Azure ADトークン取得  
-credential = DefaultAzureCredential()  
-token = credential.get_token(redis_scope)  
-  
-# redis-py 5.0以降のStrictRedisは推奨されず、Redis()を使う  
-redis_client = redis.Redis(  
-    host=redis_host,  
-    port=redis_port,  
-    ssl=redis_ssl,  
-    username=f"user:{redis_object_id}",  # Redisインスタンスで作成したEntra IDユーザー名  
-    password=token.token  
-)  
-  
-app.config['SESSION_TYPE'] = 'redis'  
-app.config['SESSION_REDIS'] = redis_client  
+app.config['SESSION_TYPE'] = 'filesystem'  
+app.config['SESSION_FILE_DIR'] = os.path.join(os.getcwd(), 'flask_session')  
 app.config['SESSION_PERMANENT'] = False  
-# app.config['SESSION_KEY_PREFIX'] = 'yourapp:session:'  
-  
 Session(app)  
   
 client = AzureOpenAI(  
@@ -130,10 +100,6 @@ def save_chat_history():
             idx = session.get("current_chat_index", 0)  
             if idx < len(sidebar):  
                 current = sidebar[idx]  
-                messages = current.get("messages", [])  
-                # メッセージが空の場合は保存しない  
-                if not messages:  
-                    return  
                 user_id = get_authenticated_user()  
                 user_name = session.get("user_name", "anonymous")  
                 session_id = current.get("session_id")  
@@ -142,8 +108,8 @@ def save_chat_history():
                     'user_id': user_id,  
                     'user_name': user_name,  
                     'session_id': session_id,  
-                    'messages': messages,  
-                    'system_message': current.get("system_message", session.get("default_system_message", "あなたは親切なAIアシスタントです。ユーザーの質問に簡潔かつ正確に答えてください。")),  
+                    'messages': current.get("messages", []),  
+                    'system_message': current.get("system_message", session.get("default_system_message", "あなたは親切なAIアシスタントです。ユーザーの質問が不明確な場合は、「こういうことですか？」と内容を確認してください。質問が明確な場合は、簡潔かつ正確に答えてください。")),  
                     'first_assistant_message': current.get("first_assistant_message", ""),  
                     'timestamp': datetime.datetime.utcnow().isoformat()  
                 }  
@@ -164,7 +130,7 @@ def load_chat_history():
                     chat = {  
                         "session_id": item['session_id'],  
                         "messages": item.get("messages", []),  
-                        "system_message": item.get("system_message", session.get('default_system_message', "あなたは親切なAIアシスタントです。ユーザーの質問に簡潔かつ正確に答えてください。")),  
+                        "system_message": item.get("system_message", session.get('default_system_message', "あなたは親切なAIアシスタントです。ユーザーの質問が不明確な場合は、「こういうことですか？」と内容を確認してください。質問が明確な場合は、簡潔かつ正確に答えてください。")),  
                         "first_assistant_message": item.get("first_assistant_message", ""),  
                     }  
                     sidebar_messages.append(chat)  
@@ -187,7 +153,7 @@ def start_new_chat():
         "session_id": new_session_id,  
         "messages": [],  
         "first_assistant_message": "",  
-        "system_message": session.get('default_system_message', "あなたは親切なAIアシスタントです。ユーザーの質問に簡潔かつ正確に答えてください。")  
+        "system_message": session.get('default_system_message', "あなたは親切なAIアシスタントです。ユーザーの質問が不明確な場合は、「こういうことですか？」と内容を確認してください。質問が明確な場合は、簡潔かつ正確に答えてください。")  
     }  
     sidebar = session.get("sidebar_messages", [])  
     sidebar.insert(0, new_chat)  
@@ -205,7 +171,7 @@ def encode_image_from_blob(blob_client):
 def index():  
     get_authenticated_user()  
     if "default_system_message" not in session:  
-        session["default_system_message"] = "あなたは親切なAIアシスタントです。ユーザーの質問に簡潔かつ正確に答えてください。"  
+        session["default_system_message"] = "あなたは親切なAIアシスタントです。ユーザーの質問が不明確な場合は、「こういうことですか？」と内容を確認してください。質問が明確な場合は、簡潔かつ正確に答えてください。"  
         session.modified = True  
     if "sidebar_messages" not in session:  
         session["sidebar_messages"] = load_chat_history() or []  
@@ -243,7 +209,9 @@ def index():
         # システムメッセージの変更  
         if 'set_system_message' in request.form:  
             sys_msg = request.form.get("system_message", "").strip()  
+            # 修正: 空欄もそのまま保存する  
             session["default_system_message"] = sys_msg  
+            # 現在のチャットにも反映  
             idx = session.get("current_chat_index", 0)  
             sidebar = session.get("sidebar_messages", [])  
             if sidebar and idx < len(sidebar):  
@@ -265,6 +233,7 @@ def index():
                 if chat.get("session_id") == selected_session:  
                     session["current_chat_index"] = idx  
                     session["main_chat_messages"] = chat.get("messages", [])  
+                    # システムメッセージも切り替え  
                     session["default_system_message"] = chat.get("system_message", session.get("default_system_message"))  
                     break  
             session.modified = True  
@@ -351,7 +320,7 @@ def send_message():
         search_chunks = last2_user + last2_ai + [prompt]  
         search_query = "\n".join(search_chunks)  
   
-        index_name = "filetest15"  
+        index_name = "filetest11"  
         search_client = SearchClient(  
             endpoint=search_service_endpoint,  
             index_name=index_name,  

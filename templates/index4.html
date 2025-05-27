@@ -48,10 +48,10 @@
         <h5>モデルに指示を与える</h5>  
         <form method="POST" style="margin-bottom: 1em;">  
           <div class="form-group">  
-            <textarea class="form-control" name="system_message" rows="3"  
+            <textarea class="form-control" name="system_message" rows="4"  
               onchange="this.form.submit()"  
               onblur="this.form.submit()"  
-            >{{ session.get('default_system_message', 'あなたは親切なAIアシスタントです。ユーザーの質問に簡潔かつ正確に答えてください。') }}</textarea>  
+            >{{ session.get('default_system_message', 'あなたは親切なAIアシスタントです。ユーザーの質問が不明確な場合は、「こういうことですか？」と内容を確認してください。質問が明確な場合は、簡潔かつ正確に答えてください。') }}</textarea>  
             <input type="hidden" name="set_system_message" value="1">  
           </div>  
         </form>  
