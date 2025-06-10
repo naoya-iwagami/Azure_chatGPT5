@@ -15,7 +15,7 @@ from PIL import Image
 import certifi  
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions  
 from werkzeug.utils import secure_filename  
-import markdown2
+import markdown2   
   
 app = Flask(__name__)  
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-default-secret-key')  
@@ -48,6 +48,86 @@ image_container_name = 'chatgpt-image'
 image_container_client = blob_service_client.get_container_client(image_container_name)  
   
 lock = threading.Lock()  
+  
+# ---------------- ハイブリッド検索用関数群 ここから ----------------  
+  
+def keyword_search(query, topNDocuments=5):  
+    results = search_client.search(  
+        search_text=query,  
+        search_fields=["title", "content"],  
+        select="title, content, filepath, url",  
+        query_type="simple",  
+        top=topNDocuments  
+    )  
+    return list(results)  
+  
+def keyword_semantic_search(query, topNDocuments=5, strictness=0.1):  
+    results = search_client.search(  
+        search_text=query,  
+        search_fields=["title", "content"],  
+        select="title, content, filepath, url",  
+        query_type="semantic",  
+        semantic_configuration_name="default",  
+        query_caption="extractive",  
+        query_answer="extractive",  
+        top=topNDocuments  
+    )  
+    results_list = [result for result in results if result.get("@search.score", 0) >= strictness]  
+    results_list.sort(key=lambda x: x.get("@search.score", 0), reverse=True)  
+    return results_list  
+  
+def get_query_embedding(query):  
+    embedding_response = client.embeddings.create(  
+        model="text-embedding-3-small",  
+        input=query  
+    )  
+    return embedding_response.data[0].embedding  
+  
+def keyword_vector_search(query, topNDocuments=5):  
+    query_embedding = get_query_embedding(query)  
+    vector_query = {  
+        "kind": "vector",  
+        "vector": query_embedding,  
+        "exhaustive": True,  
+        "fields": "contentVector",  
+        "weight": 0.5,  
+        "k": topNDocuments  
+    }  
+    results = search_client.search(  
+        search_text="*",  
+        vector_queries=[vector_query],  
+        select="title, content, filepath, url"  
+    )  
+    results_list = list(results)  
+    if results_list and "@search.score" in results_list[0]:  
+        results_list.sort(key=lambda x: x.get("@search.score", 0), reverse=True)  
+    return results_list  
+  
+def hybrid_search(query, topNDocuments=5, strictness=0.1):  
+    keyword_results = keyword_search(query, topNDocuments=topNDocuments)  
+    semantic_results = keyword_semantic_search(query, topNDocuments=topNDocuments, strictness=strictness)  
+    vector_results = keyword_vector_search(query, topNDocuments=topNDocuments)  
+    rrf_k = 60  
+    fusion_scores = {}  
+    fusion_docs = {}  
+    for result_list in [keyword_results, semantic_results, vector_results]:  
+        for idx, result in enumerate(result_list):  
+            doc_id = result.get("filepath") or result.get("title")  
+            if not doc_id:  
+                continue  
+            contribution = 1 / (rrf_k + (idx + 1))  
+            fusion_scores[doc_id] = fusion_scores.get(doc_id, 0) + contribution  
+            if doc_id not in fusion_docs:  
+                fusion_docs[doc_id] = result  
+    sorted_doc_ids = sorted(fusion_scores, key=lambda d: fusion_scores[d], reverse=True)  
+    fused_results = []  
+    for doc_id in sorted_doc_ids[:topNDocuments]:  
+        result = fusion_docs[doc_id]  
+        result["fusion_score"] = fusion_scores[doc_id]  
+        fused_results.append(result)  
+    return fused_results  
+  
+# ---------------- ハイブリッド検索用関数群 ここまで ----------------  
   
 def generate_sas_url(blob_client, blob_name):  
     storage_account_key = os.getenv("AZURE_STORAGE_ACCOUNT_KEY")  
@@ -206,9 +286,7 @@ def index():
         # システムメッセージの変更  
         if 'set_system_message' in request.form:  
             sys_msg = request.form.get("system_message", "").strip()  
-            # 修正: 空欄もそのまま保存する  
             session["default_system_message"] = sys_msg  
-            # 現在のチャットにも反映  
             idx = session.get("current_chat_index", 0)  
             sidebar = session.get("sidebar_messages", [])  
             if sidebar and idx < len(sidebar):  
@@ -230,7 +308,6 @@ def index():
                 if chat.get("session_id") == selected_session:  
                     session["current_chat_index"] = idx  
                     session["main_chat_messages"] = chat.get("messages", [])  
-                    # システムメッセージも切り替え  
                     session["default_system_message"] = chat.get("system_message", session.get("default_system_message"))  
                     break  
             session.modified = True  
@@ -318,6 +395,7 @@ def send_message():
         search_query = "\n".join(search_chunks)  
   
         index_name = "filetest11"  
+        global search_client  
         search_client = SearchClient(  
             endpoint=search_service_endpoint,  
             index_name=index_name,  
@@ -326,37 +404,30 @@ def send_message():
         )  
         topNDocuments = 20  
         strictness = 0.1  
-        search_results = search_client.search(  
-            search_text=search_query,  
-            search_fields=["content", "title"],  
-            select="content,filepath,title,url",  
-            query_type="semantic",  
-            semantic_configuration_name="default",  
-            query_caption="extractive",  
-            query_answer="extractive",  
-            top=topNDocuments  
-        )  
-        results_list = [result for result in search_results if result['@search.score'] >= strictness]  
-        results_list.sort(key=lambda x: x['@search.score'], reverse=True)  
+  
+        # ハイブリッド検索  
+        results_list = hybrid_search(search_query, topNDocuments=topNDocuments, strictness=strictness)  
         context = "\n".join(  
             [f"ファイル名: {result.get('title', '不明')}\n内容: {result['content']}" for result in results_list]  
         )  
   
-        rule_message = (  
-            "回答する際は、以下のルールに従ってください：\n"  
-            "1. 簡潔かつ正確に回答してください。\n"  
-            "2. 必要に応じて、提供されたコンテキストを参照してください。\n"  
-        )  
+        # メッセージリストの組み立て（順番を改善）  
         messages_list = []  
         idx = session.get("current_chat_index", 0)  
         sidebar = session.get("sidebar_messages", [])  
         system_msg = sidebar[idx].get("system_message", session.get("default_system_message"))  
         messages_list.append({"role": "system", "content": system_msg})  
-        messages_list.append({"role": "user", "content": rule_message})  
-        messages_list.append({"role": "user", "content": f"以下のコンテキストを参考にしてください: {context[:50000]}"})  
-        past_message_count = 20  
-        messages_list.extend(session.get("main_chat_messages", [])[-(past_message_count * 2):])  
   
+        past_message_count = 20  
+        main_chat_messages = session.get("main_chat_messages", [])  
+        # 今回の発言（最後のuser）は除く  
+        past_messages = main_chat_messages[-(past_message_count * 2):-1] if len(main_chat_messages) > 1 else []  
+        messages_list.extend(past_messages)  
+  
+        # 今回のユーザー発言  
+        messages_list.append({"role": "user", "content": prompt})  
+  
+        # コンテキスト（検索結果＋画像）  
         image_filenames = session.get("image_filenames", [])  
         if image_filenames:  
             image_contents = []  
@@ -373,7 +444,16 @@ def send_message():
                     })  
                 except Exception as e:  
                     print("画像エンコードエラー:", e)  
-            messages_list[2]["content"] = [{"type": "text", "text": messages_list[2]["content"]}] + image_contents  
+            # テキスト＋画像  
+            messages_list.append({  
+                "role": "user",  
+                "content": [{"type": "text", "text": f"以下のコンテキストを参考にしてください: {context[:50000]}"}] + image_contents  
+            })  
+        else:  
+            messages_list.append({  
+                "role": "user",  
+                "content": f"以下のコンテキストを参考にしてください: {context[:50000]}"  
+            })  
   
         # 会話モードに応じてモデルとパラメータを切り替え  
         mode = session.get("conversation_mode", "qa")  
